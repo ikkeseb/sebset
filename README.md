@@ -6,12 +6,12 @@ Weekends can sleep in, or get a plan of their own, and a vacation switch makes e
 weekend night.
 It is like f.lux, inside the Omarchy shell, driving the `hyprsunset` that Omarchy already ships.
 
-![The Sebset menu](docs/menu.png) <!-- screenshot placeholder -->
+![The Sebset menu](docs/menu.png)
 
 ## Install
 
 ```bash
-omarchy plugin add <git-url> --enable
+omarchy plugin add https://github.com/ikkeseb/sebset.git --enable
 ```
 
 The icon lands in the bar next to the clock (`centerBegin`). Move it with
@@ -29,9 +29,10 @@ Omarchy's own night-light indicator does the same job, so you may want to hide i
 Clone the repo anywhere and link it into the shell's plugin folder:
 
 ```bash
-git clone <git-url> ~/src/sebset
+git clone https://github.com/ikkeseb/sebset.git ~/src/sebset
 ln -s ~/src/sebset ~/.config/omarchy/plugins/sebset
 omarchy-shell shell rescanPlugins
+omarchy plugin enable sebset.nightlight
 ```
 
 The shell reads a linked plugin's files once per path, so after editing the code, run
@@ -95,10 +96,10 @@ omarchy-shell sebset.nightlight status         # JSON: kelvin, phase, manual hol
 `toggleWarm`, `warmer` and `cooler` show Omarchy's on-screen display with the new value (`5300K`
 or `Neutral`) and a bar that fills as the screen warms, since a keybinding has no tooltip.
 
-For example, in `~/.config/hypr/bindings.conf`:
+For example, in `~/.config/hypr/bindings.lua`:
 
-```
-bindd = SUPER CTRL, N, Night light, exec, omarchy-shell sebset.nightlight toggleWarm
+```lua
+o.bind("SUPER + CTRL + N", "Night light", "omarchy-shell sebset.nightlight toggleWarm")
 ```
 
 ## The schedule
@@ -173,7 +174,7 @@ the next re-check at most; use Sebset's icon or its `toggleWarm` command instead
 
 Hyprland fades between colour matrices by default on AMD and Intel GPUs (`render:ctm_animation`
 on `auto`), so every temperature change re-renders the screen for a moment and can show as a short
-frame hitch. Sebset does its own slow ramp, so that fade adds nothing: turn it off.
+frame hitch. Sebset already ramps in small steps, so you may prefer to turn the fade off (it is a compositor-wide setting).
 
 In `~/.config/hypr/looknfeel.lua` (Lua config):
 

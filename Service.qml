@@ -84,12 +84,13 @@ Item {
     // 6500K still tints, so neutral is the identity matrix. Only numbers reach
     // the command line. When hyprsunset is not running it is started the way
     // Omarchy's own night light does it, then given up to 5 s to answer.
-    var command = k >= neutral ? "hyprctl hyprsunset identity" : "hyprctl hyprsunset temperature " + Math.round(k)
+    // `timeout` keeps a stalled hyprsunset from holding the apply queue.
+    var command = k >= neutral ? "timeout 5 hyprctl hyprsunset identity" : "timeout 5 hyprctl hyprsunset temperature " + Math.round(k)
     inFlightKelvin = k
     applyProcess.command = ["sh", "-c",
       "if ! pgrep -x hyprsunset >/dev/null; then "
       + "setsid uwsm-app -- hyprsunset >/dev/null 2>&1 & "
-      + "i=0; until hyprctl hyprsunset temperature >/dev/null 2>&1 || [ $i -ge 20 ]; do sleep 0.25; i=$((i+1)); done; "
+      + "i=0; until timeout 1 hyprctl hyprsunset temperature >/dev/null 2>&1 || [ $i -ge 20 ]; do sleep 0.25; i=$((i+1)); done; "
       + "fi; " + command + " >/dev/null"]
     applyProcess.running = true
   }
@@ -298,6 +299,9 @@ Item {
     id: mkdirProcess
     onExited: function(exitCode) {
       root.dirReady = exitCode === 0
+      // The FileView may have looked before the folder existed; point it at
+      // the path again so a settings file made by hand later is watched.
+      if (root.dirReady) { settingsFile.path = ""; settingsFile.path = root.settingsPath }
       if (!root.dirReady) console.warn("sebset: cannot create", root.configDir)
       else if (root.saveWanted) root.save()
     }
