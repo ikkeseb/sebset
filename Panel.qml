@@ -9,8 +9,8 @@ import "Schedule.js" as Schedule
 // they all show and drive the one engine in Service.qml, which the shell
 // loads once.
 //
-// Left click toggles warm and neutral, the wheel nudges the warmth (up is
-// warmer), right click opens the menu.
+// Left click toggles warm and neutral, the wheel nudges the kelvin (up is
+// cooler, a higher kelvin), right click opens the menu.
 Panel {
   id: root
   moduleName: "sebset.nightlight"
@@ -113,7 +113,7 @@ Panel {
     onWheelMoved: function(delta) {
       var wheel = Util.wheelSteps(root.wheelAccumulator, delta)
       root.wheelAccumulator = wheel.remainder
-      if (wheel.steps !== 0 && root.ready) root.nl.nudge(wheel.steps)
+      if (wheel.steps !== 0 && root.ready) root.nl.nudge(-wheel.steps)
     }
   }
 

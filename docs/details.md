@@ -43,7 +43,7 @@ The shell reads a linked plugin's files once per path, so after editing the code
 | On the bar icon | Does |
 |---|---|
 | Left click | Toggles warm and neutral. From neutral it turns on the evening's end warmth. |
-| Scroll | Up is warmer, down is cooler, 250K a notch, from 3000K to 6500K. |
+| Scroll | Up is cooler (more kelvin), down is warmer, 250K a notch, from 3000K to 6500K. |
 | Right click | Opens the menu. |
 
 While the pointer rests on the icon, its tooltip follows every click and wheel notch live. The

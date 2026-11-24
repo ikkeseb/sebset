@@ -167,7 +167,8 @@ Item {
     else setManual(Schedule.toggleWarmth(config, new Date()))
   }
 
-  // Wheel up warms, the way the menu's slider warms to the right. The steps
+  // A positive step warms (the IPC `warmer`); the bar icon sends wheel up as
+  // a negative step, so wheel up cools, like raising the kelvin. The steps
   // stay 250K from the last wheel value, whatever band that showed.
   function nudge(steps) {
     var from = manual ? manual.kelvin : shownKelvin
