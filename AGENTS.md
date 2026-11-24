@@ -1,8 +1,8 @@
-# AGENTS.md — dusk
+# AGENTS.md — sebset
 
 An Omarchy shell plugin: a scheduled, gentle night light that drives `hyprsunset`, with a bar icon
 and a small settings menu. Public-facing open source in the making: every file is in English.
-"dusk" is a working name until the owner picks the public one.
+Its name is "sebset" (the owner's pick, 2026-11-24).
 
 - Never edit `/usr/share/omarchy/` (reading is fine). The plugin is linked into
   `~/.config/omarchy/plugins/` for live testing.
