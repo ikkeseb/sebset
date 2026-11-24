@@ -5,7 +5,7 @@
   "version": "0.1.0",
   "author": "the sebset authors",
   "license": "MIT",
-  "description": "A scheduled, gentle night light for the Omarchy bar: slow evening ramps through hyprsunset, a milder weekend plan, and a small menu.",
+  "description": "A scheduled, gentle night light for the Omarchy bar: slow evening ramps through hyprsunset, weekends that can sleep in, and a small menu.",
   "kinds": [
     "bar-widget",
     "service"

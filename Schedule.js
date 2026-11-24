@@ -14,20 +14,31 @@ var NEUTRAL = 6500
 var WARMEST = 3000
 var MAX_RAMP = 240
 var MINUTE = 60000
-// A ramp moves the screen at most this much per step, small enough that no
-// single step is noticed, and steps no more often than every MIN_STEP_MS.
-var MAX_STEP_KELVIN = 25
+// hyprsunset 0.4 computes its colour matrix from kelvin / 100 in integers,
+// so the screen only changes in 100K bands. Every value Sebset applies is a
+// multiple of BAND, and a ramp takes one band per step, no step sooner than
+// MIN_STEP_MS after the last.
+var BAND = 100
 var MIN_STEP_MS = 5000
 // An evening starts between noon and 05:59 the next morning; a start typed
-// as 01:00 is that night's 01:00, not the next afternoon's. Mornings end by noon.
+// as 01:00 is that night's 01:00, not the next afternoon's. Mornings run up
+// to 14:00, for sleeping in.
 var EARLIEST_START = 12 * 60
 var LATEST_START = 6 * 60 - 1
-var LATEST_MORNING = 12 * 60
+var LATEST_MORNING = 14 * 60
+
+// How Friday and Saturday nights differ from the other evenings:
+//   same     every evening runs the one evening plan
+//   sleepIn  the evening plan, with a later morning (weekendMorning)
+//   own      a plan of their own (weekend)
+var WEEKEND_MODES = ["same", "sleepIn", "own"]
 
 var DEFAULTS = {
   scheduleEnabled: true,
+  weekendMode: "same",
+  weekendMorning: 9 * 60,
   vacation: false,
-  weekdays: { start: 18 * 60 + 30, rampMinutes: 60, endKelvin: 5000, morning: 7 * 60 },
+  evenings: { start: 18 * 60 + 30, rampMinutes: 60, endKelvin: 5000, morning: 7 * 60 },
   weekend: { start: 20 * 60, rampMinutes: 60, endKelvin: 5500, morning: 9 * 60 }
 }
 
@@ -41,6 +52,19 @@ function clampInt(value, low, high, fallback) {
 
 function clampKelvin(value, fallback) {
   return clampInt(value, WARMEST, NEUTRAL, fallback === undefined ? NEUTRAL : fallback)
+}
+
+// The 100K band a temperature falls in: what hyprsunset will show for it.
+function band(kelvin) {
+  var k = Math.round(Number(kelvin) / BAND) * BAND
+  if (!isFinite(k)) return NEUTRAL
+  return Math.max(WARMEST, Math.min(NEUTRAL, k))
+}
+
+// A plan's end warmth: clamped and on a band.
+function clampWarmth(value, fallback) {
+  var k = clampKelvin(value, null)
+  return k === null ? fallback : band(k)
 }
 
 // "18:43", "18.43", "1843", "18" or a number of minutes -> minutes after
@@ -119,18 +143,22 @@ function normalizePlan(raw, defaults) {
   return {
     start: clampStart(plan.start, defaults.start),
     rampMinutes: clampInt(ramp, 0, MAX_RAMP, defaults.rampMinutes),
-    endKelvin: clampKelvin(kelvin, defaults.endKelvin),
+    endKelvin: clampWarmth(kelvin, defaults.endKelvin),
     morning: clampMorning(plan.morning, defaults.morning)
   }
 }
 
 // Any value (parsed JSON, garbage, null) -> complete, clamped settings.
+// The evening plan was called "weekdays" before there were weekend modes; a
+// file with that name still reads.
 function normalize(raw) {
   var s = raw && typeof raw === "object" && !Array.isArray(raw) ? raw : {}
   return {
     scheduleEnabled: typeof s.scheduleEnabled === "boolean" ? s.scheduleEnabled : DEFAULTS.scheduleEnabled,
+    weekendMode: WEEKEND_MODES.indexOf(s.weekendMode) >= 0 ? s.weekendMode : DEFAULTS.weekendMode,
+    weekendMorning: clampMorning(s.weekendMorning, DEFAULTS.weekendMorning),
     vacation: typeof s.vacation === "boolean" ? s.vacation : DEFAULTS.vacation,
-    weekdays: normalizePlan(s.weekdays, DEFAULTS.weekdays),
+    evenings: normalizePlan(s.evenings !== undefined ? s.evenings : s.weekdays, DEFAULTS.evenings),
     weekend: normalizePlan(s.weekend, DEFAULTS.weekend)
   }
 }
@@ -145,20 +173,27 @@ function serialize(settings) {
   function plan(p) {
     return { start: formatTime(p.start), rampMinutes: p.rampMinutes, endKelvin: p.endKelvin, morning: formatTime(p.morning) }
   }
-  return { scheduleEnabled: s.scheduleEnabled, vacation: s.vacation, weekdays: plan(s.weekdays), weekend: plan(s.weekend) }
+  return {
+    scheduleEnabled: s.scheduleEnabled,
+    weekendMode: s.weekendMode,
+    weekendMorning: formatTime(s.weekendMorning),
+    vacation: s.vacation,
+    evenings: plan(s.evenings),
+    weekend: plan(s.weekend)
+  }
 }
 
 // One step of a menu stepper, clamped. Start times step along the evening's
 // axis, so 23:50 + 15 min is 00:05 and 12:00 - 15 min stays 12:00.
 function stepField(field, value, delta) {
   if (field === "start") {
-    var off = startOffset(clampStart(value, DEFAULTS.weekdays.start)) + delta
+    var off = startOffset(clampStart(value, DEFAULTS.evenings.start)) + delta
     off = Math.max(EARLIEST_START, Math.min(1440 + LATEST_START, off))
     return off % 1440
   }
   if (field === "morning") return Math.max(0, Math.min(LATEST_MORNING, clampMorning(value, 0) + delta))
   if (field === "rampMinutes") return clampInt(Number(value) + delta, 0, MAX_RAMP, 0)
-  if (field === "endKelvin") return clampKelvin(Number(value) + delta)
+  if (field === "endKelvin") return clampWarmth(Number(value) + delta, NEUTRAL)
   return value
 }
 
@@ -168,7 +203,7 @@ function parseField(field, text) {
   if (field === "start") { v = parseTime(text); return v === null ? null : clampStart(v, null) }
   if (field === "morning") { v = parseTime(text); return v === null ? null : clampMorning(v, null) }
   if (field === "rampMinutes") { v = parseDuration(text); return v === null ? null : clampInt(v, 0, MAX_RAMP, null) }
-  if (field === "endKelvin") { v = parseKelvin(text); return v === null ? null : clampKelvin(v, null) }
+  if (field === "endKelvin") { v = parseKelvin(text); return v === null ? null : clampWarmth(v, null) }
   return null
 }
 
@@ -179,32 +214,49 @@ function formatField(field, value) {
   return String(value)
 }
 
-// Fri and Sat evenings come before a day off; vacation makes every evening one.
-function planKeyFor(settings, year, month, day) {
-  if (settings.vacation) return "weekend"
+// Fri and Sat evenings come before a day off; with vacation on, every evening
+// does. Vacation means nothing while weekends are the same as other evenings.
+function isWeekendEvening(settings, year, month, day) {
+  if (settings.weekendMode === "same") return false
+  if (settings.vacation) return true
   var weekday = new Date(year, month, day).getDay()
-  return weekday === 5 || weekday === 6 ? "weekend" : "weekdays"
+  return weekday === 5 || weekday === 6
+}
+
+// The plan for the evening that starts on the given calendar day:
+// { key: "evenings"|"weekend", start, rampMinutes, endKelvin, morning }.
+function planFor(settings, year, month, day) {
+  var p = settings.evenings
+  var key = "evenings"
+  if (isWeekendEvening(settings, year, month, day)) {
+    key = "weekend"
+    if (settings.weekendMode === "own") p = settings.weekend
+    else p = { start: p.start, rampMinutes: p.rampMinutes, endKelvin: p.endKelvin, morning: settings.weekendMorning }
+  }
+  return { key: key, start: p.start, rampMinutes: p.rampMinutes, endKelvin: p.endKelvin, morning: p.morning }
+}
+
+// The ramp's step: one band per step, spread evenly over the ramp, never
+// sooner than MIN_STEP_MS apart. A ramp too steep for that ends late.
+function rampSteps(rampMinutes, endKelvin) {
+  var bands = Math.round((NEUTRAL - endKelvin) / BAND)
+  if (bands <= 0 || rampMinutes <= 0) return { bands: bands, stepMs: 0 }
+  return { bands: bands, stepMs: Math.max(MIN_STEP_MS, rampMinutes * MINUTE / bands) }
 }
 
 // The evening that starts on the given calendar day, in epoch milliseconds.
 // Empty when its morning does not come after its start.
 function eveningOf(settings, year, month, day) {
-  var key = planKeyFor(settings, year, month, day)
-  var plan = settings[key]
+  var plan = planFor(settings, year, month, day)
   var startAt = new Date(year, month, day, 0, startOffset(plan.start)).getTime()
   var morningAt = new Date(year, month, day + 1, 0, plan.morning).getTime()
-  var fullRampEndAt = startAt + plan.rampMinutes * MINUTE
-  var span = NEUTRAL - plan.endKelvin
-  // The ramp steps on a fixed grid from its start: as long a step as keeps
-  // each one within MAX_STEP_KELVIN, never shorter than MIN_STEP_MS.
-  var stepMs = span > 0 && plan.rampMinutes > 0
-    ? Math.max(MIN_STEP_MS, Math.floor(plan.rampMinutes * MINUTE * MAX_STEP_KELVIN / span))
-    : Math.max(MIN_STEP_MS, plan.rampMinutes * MINUTE)
+  var steps = rampSteps(plan.rampMinutes, plan.endKelvin)
+  var fullRampEndAt = startAt + Math.round(steps.bands * steps.stepMs)
   return {
-    plan: key,
+    plan: plan.key,
     endKelvin: plan.endKelvin,
-    rampMinutes: plan.rampMinutes,
-    stepMs: stepMs,
+    bands: steps.bands,
+    stepMs: steps.stepMs,
     startAt: startAt,
     fullRampEndAt: fullRampEndAt,
     // A morning inside the ramp cuts the ramp short.
@@ -214,11 +266,23 @@ function eveningOf(settings, year, month, day) {
   }
 }
 
-function kelvinAt(evening, t) {
-  if (evening.rampMinutes <= 0) return evening.endKelvin
-  var progress = (t - evening.startAt) / (evening.fullRampEndAt - evening.startAt)
-  progress = Math.max(0, Math.min(1, progress))
-  return Math.round(NEUTRAL - (NEUTRAL - evening.endKelvin) * progress)
+// Ramp step n (0 = the start, still neutral) and the instant it begins.
+function stepAt(evening, n) {
+  return evening.startAt + Math.round(n * evening.stepMs)
+}
+
+// The step in progress at t, counted so a timer that fires late still lands
+// on a band, one step at a time.
+function stepIndexAt(evening, t) {
+  if (evening.stepMs <= 0) return evening.bands
+  var n = Math.floor((t - evening.startAt) / evening.stepMs)
+  while (n > 0 && stepAt(evening, n) > t) n--
+  while (n < evening.bands && stepAt(evening, n + 1) <= t) n++
+  return Math.max(0, n)
+}
+
+function kelvinAtStep(evening, n) {
+  return NEUTRAL - BAND * Math.max(0, Math.min(evening.bands, n))
 }
 
 function nextEveningAfter(settings, t) {
@@ -253,14 +317,20 @@ function targetAt(rawSettings, date) {
 
   var d = new Date(t)
   var current = null
-  // An evening spans at most noon to noon, so only yesterday's or today's can
-  // hold this instant.
-  for (var i = -1; i <= 0 && !current; i++) {
+  // An evening starts at noon at the earliest and ends by 14:00 the next day,
+  // so only today's or yesterday's can hold this instant. When both do (a
+  // late morning after an early start), the newer evening has begun.
+  for (var i = 0; i >= -1 && !current; i--) {
     var e = eveningOf(settings, d.getFullYear(), d.getMonth(), d.getDate() + i)
     if (!e.empty && t >= e.startAt && t < e.morningAt) current = e
   }
 
-  var next = nextEveningAfter(settings, current ? current.morningAt - 1 : t)
+  var next = nextEveningAfter(settings, current ? current.startAt : t)
+  if (current && next && next.startAt < current.morningAt) {
+    // The next evening starts before this one's morning: it ends this one.
+    current.morningAt = next.startAt
+    current.rampEndAt = Math.min(current.rampEndAt, next.startAt)
+  }
   if (next) {
     result.nextStartAt = new Date(next.startAt)
     result.nextPlan = next.plan
@@ -283,17 +353,17 @@ function targetAt(rawSettings, date) {
   result.boundaryAt = new Date(current.morningAt)
 
   if (t < current.rampEndAt) {
-    // Quantized to the step grid, so a timer that fires late never makes a
-    // bigger jump than the grid allows.
-    var step = Math.floor((t - current.startAt) / current.stepMs)
-    var stepAt = current.startAt + step * current.stepMs
+    var n = stepIndexAt(current, t)
     result.phase = "ramp"
-    result.kelvin = kelvinAt(current, stepAt)
+    result.kelvin = kelvinAtStep(current, n)
     result.rampEndAt = new Date(current.rampEndAt)
-    result.nextChangeAt = new Date(Math.min(stepAt + current.stepMs, current.rampEndAt))
+    result.nextChangeAt = new Date(Math.min(stepAt(current, n + 1), current.rampEndAt))
   } else {
+    // Past the ramp, or cut short by the morning: the band the ramp reached.
+    var reached = current.rampEndAt >= current.fullRampEndAt ? current.bands
+      : stepIndexAt(current, current.rampEndAt)
     result.phase = "night"
-    result.kelvin = kelvinAt(current, current.rampEndAt)
+    result.kelvin = kelvinAtStep(current, reached)
     result.nextChangeAt = new Date(current.morningAt)
   }
   return result
@@ -306,7 +376,7 @@ function toggleWarmth(rawSettings, date) {
   if (target.plan) return target.endKelvin
   var s = normalize(rawSettings)
   var d = date instanceof Date ? date : new Date()
-  return s[planKeyFor(s, d.getFullYear(), d.getMonth(), d.getDate())].endKelvin
+  return planFor(s, d.getFullYear(), d.getMonth(), d.getDate()).endKelvin
 }
 
 if (typeof module !== "undefined") {
@@ -314,8 +384,10 @@ if (typeof module !== "undefined") {
     NEUTRAL: NEUTRAL,
     WARMEST: WARMEST,
     MAX_RAMP: MAX_RAMP,
-    MAX_STEP_KELVIN: MAX_STEP_KELVIN,
+    BAND: BAND,
     MIN_STEP_MS: MIN_STEP_MS,
+    LATEST_MORNING: LATEST_MORNING,
+    WEEKEND_MODES: WEEKEND_MODES,
     DEFAULTS: DEFAULTS,
     normalize: normalize,
     defaults: defaults,
@@ -326,10 +398,11 @@ if (typeof module !== "undefined") {
     formatDuration: formatDuration,
     parseKelvin: parseKelvin,
     clampKelvin: clampKelvin,
+    band: band,
     stepField: stepField,
     parseField: parseField,
     formatField: formatField,
-    planKeyFor: planKeyFor,
+    planFor: planFor,
     eveningOf: eveningOf,
     targetAt: targetAt,
     toggleWarmth: toggleWarmth

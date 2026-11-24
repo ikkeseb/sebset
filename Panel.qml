@@ -16,28 +16,24 @@ Panel {
   moduleName: "sebset.nightlight"
   ipcTarget: "sebset"
 
-  // The shared engine. A shell without third-party services gets one of its
-  // own, which still works, one engine per bar.
-  property var engine: null
-  readonly property var nl: engine || (localEngine.item ? localEngine.item : null)
+  // The shared engine. Without it (a shell that loads no plugin services)
+  // the icon stays inactive and says so once in the log.
+  property var nl: null
   readonly property bool ready: nl !== null
+  property bool missingLogged: false
 
   // The bar is injected after the widget completes, so the lookup waits for it.
   function findEngine() {
     if (!bar) return
-    var found = bar.shell && typeof bar.shell.serviceFor === "function"
-      ? bar.shell.serviceFor("sebset.nightlight") : null
-    engine = found || null
-    localEngine.active = !engine
+    nl = bar.shell && typeof bar.shell.serviceFor === "function"
+      ? (bar.shell.serviceFor("sebset.nightlight") || null) : null
+    if (!nl && !missingLogged) {
+      missingLogged = true
+      console.warn("sebset: the shell gave no sebset.nightlight service; the icon stays inactive")
+    }
   }
 
   onBarChanged: findEngine()
-
-  Loader {
-    id: localEngine
-    active: false
-    source: Qt.resolvedUrl("Service.qml")
-  }
 
   readonly property int neutral: Schedule.NEUTRAL
   readonly property int warmest: Schedule.WARMEST
@@ -84,7 +80,7 @@ Panel {
   // The slider applies at once, at most every 80 ms while dragging.
   property int sliderKelvin: neutral
   function slideTo(kelvin) {
-    sliderKelvin = Math.round(kelvin / 50) * 50
+    sliderKelvin = Schedule.band(kelvin)
     if (sliderThrottle.running) return
     setManual(sliderKelvin)
     sliderThrottle.start()
@@ -107,6 +103,8 @@ Panel {
     activeColor: Commons.Color.accent
     tooltipText: root.statusText
 
+    // The tooltip under the pointer shows the new value live (below), so
+    // the icon needs no OSD; the keybinding commands show one.
     onPressed: function(b) {
       if (b === Qt.RightButton) root.togglePanel()
       else if (b === Qt.LeftButton && root.ready) root.nl.toggleWarm()
@@ -118,6 +116,10 @@ Panel {
       if (wheel.steps !== 0 && root.ready) root.nl.nudge(wheel.steps)
     }
   }
+
+  // The bar sets a tooltip's text when the pointer arrives; while it stays,
+  // the wheel changes the value under it, so the text is shown again.
+  onStatusTextChanged: if (bar && button.tooltipHovered) bar.showTooltip(button, statusText)
 
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
@@ -182,7 +184,7 @@ Panel {
       onTabRequested: function(direction) { root.switchPanel(direction) }
       onTextKey: function(t) {
         var key = t.toLowerCase()
-        if (key === "v") root.updateConfig(function(c) { c.vacation = !c.vacation })
+        if (key === "v" && root.config.weekendMode !== "same") root.updateConfig(function(c) { c.vacation = !c.vacation })
         else if (key === "s") root.updateConfig(function(c) { c.scheduleEnabled = !c.scheduleEnabled })
       }
 
@@ -279,7 +281,7 @@ Panel {
             Text {
               id: nowValue
               textFormat: Text.PlainText
-              text: root.kelvinText(warmthSlider.dragging ? root.neutral - warmthSlider.liveValue : root.shownKelvin)
+              text: root.kelvinText(warmthSlider.dragging ? Schedule.band(root.neutral - warmthSlider.liveValue) : root.shownKelvin)
               color: Qt.darker(root.foreground, 1.4)
               font.family: root.fontFamily
               font.pixelSize: Style.font.caption
@@ -300,34 +302,107 @@ Panel {
             value: root.neutral - root.shownKelvin
             fillColor: Commons.Color.accent
             onMoved: function(v) { root.slideTo(root.neutral - v) }
-            onReleased: function(v) { root.setManual(Math.round((root.neutral - v) / 50) * 50) }
+            onReleased: function(v) { root.setManual(Schedule.band(root.neutral - v)) }
           }
         }
 
         PanelSeparator { foreground: root.foreground }
 
         PlanSection {
-          planKey: "weekdays"
-          title: strings.t("weekdays")
-          caption: root.config.vacation ? strings.t("weekdays.paused") : strings.t("weekdays.caption")
-          dimmed: root.config.vacation || !root.config.scheduleEnabled
+          planKey: "evenings"
+          title: strings.t("evenings")
+          caption: strings.t("evenings.caption." + root.config.weekendMode)
+          dimmed: !root.config.scheduleEnabled || (root.config.vacation && root.config.weekendMode === "own")
         }
 
         PanelSeparator { foreground: root.foreground }
 
+        // Weekends: the same as other evenings, a later morning, or a plan
+        // of their own.
+        Column {
+          width: parent.width
+          spacing: Style.space(6)
+          opacity: root.config.scheduleEnabled ? 1 : 0.55
+
+          Item {
+            width: parent.width
+            implicitHeight: Math.max(weekendHeader.implicitHeight, weekendChoice.implicitHeight)
+
+            PanelSectionHeader {
+              id: weekendHeader
+              text: strings.t("weekends")
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+            }
+
+            ButtonGroup {
+              id: weekendChoice
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.space(4)
+              focusable: false
+              options: [
+                { value: "same", label: strings.t("weekends.same"), tooltip: strings.t("weekends.same.tip") },
+                { value: "sleepIn", label: strings.t("weekends.sleepIn"), tooltip: strings.t("weekends.sleepIn.tip") },
+                { value: "own", label: strings.t("weekends.own"), tooltip: strings.t("weekends.own.tip") }
+              ]
+              value: root.config.weekendMode
+              foreground: root.foreground
+              fontFamily: root.fontFamily
+              fontSize: Style.font.caption
+              onChanged: function(v) { root.updateConfig(function(c) { c.weekendMode = v }) }
+            }
+          }
+
+          Stepper {
+            visible: root.config.weekendMode === "sleepIn"
+            width: parent.width
+            field: "morning"
+            label: strings.t("field.weekendMorning")
+            step: 15
+            fineStep: 1
+            hint: strings.t("hint.time")
+            value: root.config.weekendMorning
+            foreground: root.foreground
+            fontFamily: root.fontFamily
+            focusReturn: panel.loadedContent
+            onEditingChanged: root.editors = Math.max(0, root.editors + (editing ? 1 : -1))
+            onEdited: function(v) { root.updateConfig(function(c) { c.weekendMorning = v }) }
+          }
+
+          Text {
+            visible: root.config.weekendMode !== "own"
+            width: parent.width
+            leftPadding: Style.space(6)
+            textFormat: Text.PlainText
+            text: strings.t("weekends.caption." + root.config.weekendMode)
+            color: Qt.darker(root.foreground, 1.4)
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
+          }
+        }
+
         PlanSection {
+          visible: root.config.weekendMode === "own"
           planKey: "weekend"
           title: strings.t("weekend")
           caption: root.config.vacation ? strings.t("weekend.vacation") : strings.t("weekend.caption")
           dimmed: !root.config.scheduleEnabled
         }
 
-        PanelSeparator { foreground: root.foreground }
+        PanelSeparator {
+          visible: root.config.weekendMode !== "same"
+          foreground: root.foreground
+        }
 
         Toggle {
+          visible: root.config.weekendMode !== "same"
           width: parent.width
           label: strings.t("vacation")
-          description: strings.t("vacation.description")
+          description: strings.t("vacation.description." + root.config.weekendMode)
           checked: root.config.vacation
           foreground: root.foreground
           fontFamily: root.fontFamily
@@ -377,7 +452,7 @@ Panel {
 
     PlanStepper { host: planSection; field: "start"; label: strings.t("field.start"); step: 15; fineStep: 1; hint: strings.t("hint.time") }
     PlanStepper { host: planSection; field: "rampMinutes"; label: strings.t("field.ramp"); step: 5; fineStep: 1; hint: strings.t("hint.ramp") }
-    PlanStepper { host: planSection; field: "endKelvin"; label: strings.t("field.warmth"); step: 100; fineStep: 10; hint: strings.t("hint.kelvin") }
+    PlanStepper { host: planSection; field: "endKelvin"; label: strings.t("field.warmth"); step: 100; fineStep: 100; hint: strings.t("hint.kelvin") }
     PlanStepper { host: planSection; field: "morning"; label: strings.t("field.morning"); step: 15; fineStep: 1; hint: strings.t("hint.time") }
   }
 
