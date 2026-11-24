@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "sebset.nightlight",
+  "name": "Sebset",
+  "version": "0.1.0",
+  "author": "the sebset authors",
+  "license": "MIT",
+  "description": "A scheduled, gentle night light for the Omarchy bar: slow evening ramps through hyprsunset, a milder weekend plan, and a small menu.",
+  "kinds": [
+    "bar-widget",
+    "service"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml",
+    "service": "Service.qml"
+  },
+  "barWidget": {
+    "displayName": "Sebset",
+    "description": "Night light with an evening schedule. Left click toggles warm and neutral, scroll adjusts the warmth, right click opens the menu.",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "centerBegin"
+  }
+}
