@@ -30,7 +30,7 @@ Clone the repo anywhere and link it into the shell's plugin folder:
 
 ```bash
 git clone https://github.com/ikkeseb/sebset.git ~/src/sebset
-ln -s ~/src/sebset ~/.config/omarchy/plugins/sebset
+ln -s ~/src/sebset ~/.config/omarchy/plugins/sebset.nightlight   # this name lets `omarchy plugin update` find it
 omarchy-shell shell rescanPlugins
 omarchy plugin enable sebset.nightlight
 ```
